@@ -1,0 +1,125 @@
+#include <ESP8266WiFi.h>
+#include <Firebase_ESP_Client.h>
+#include "addons/TokenHelper.h"
+#include "addons/RTDBHelper.h"
+#include <DHT.h>
+
+#define WIFI_SSID "123456789"
+#define WIFI_PASSWORD "123456789"
+#define API_KEY "AIzaSyCfagYS4c8SvrSwuGT6XSWQP1ABSAPfSRM"
+#define DATABASE_URL "https://nodemcu-abee1-default-rtdb.firebaseio.com/"
+
+FirebaseData fbdo;
+FirebaseAuth auth;
+FirebaseConfig config;
+
+unsigned long sendDataPrevMillis = 0;
+bool signupOK = false;
+// DHT sensor configuration
+#define DHTPIN D2  // Use GPIO 2 for D4 on NodeMCU
+#define DHTTYPE DHT11
+DHT dht(DHTPIN, DHTTYPE);
+
+// Soil moisture sensor configuration
+#define SOIL_MOISTURE_PIN A0
+
+// Relay configuration
+#define RELAY_PIN D1  // Use GPIO 5 for D1 on NodeMCU
+
+void setup() {
+  Serial.begin(115200);
+  pinMode(RELAY_PIN, OUTPUT); // Set the relay pin as OUTPUT
+  digitalWrite(RELAY_PIN, LOW); // Initialize relay state to OFF
+  delay(2000);  // Allow time for the sensors to stabilize
+  dht.begin();
+
+   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+  Serial.print("Connecting to Wi-Fi");
+  while (WiFi.status() != WL_CONNECTED){
+    Serial.print(".");
+    delay(300);
+  }
+  Serial.println();
+  Serial.print("Connected with IP: ");
+  Serial.println(WiFi.localIP());
+  Serial.println();
+  config.api_key = API_KEY;
+  config.database_url = DATABASE_URL;
+  if (Firebase.signUp(&config, &auth, "", "")){
+    Serial.println("ok");
+    signupOK = true;
+  }
+  else{
+    Serial.printf("%s\n", config.signer.signupError.message.c_str());
+  }
+  config.token_status_callback = tokenStatusCallback; //see addons/TokenHelper.h
+  Firebase.begin(&config, &auth);
+  Firebase.reconnectWiFi(true);
+}
+
+void loop() {
+  // Read DHT sensor data
+  float humidity = dht.readHumidity();
+  float temperature = dht.readTemperature();
+
+  // Read soil moisture sensor data
+  int soilMoisture = analogRead(SOIL_MOISTURE_PIN);
+
+  // Map the soil moisture value to a percentage (adjust the range based on your sensor)
+  int moisturePercentage = map(soilMoisture, 0, 1023, 0, 100);
+
+  Serial.print("Humidity: ");
+  Serial.print(humidity);
+  Serial.print("%\t");
+  Serial.print("Temperature: ");
+  Serial.print(temperature);
+  Serial.println("°C");
+
+  Serial.print("Soil Moisture: ");
+  Serial.print(moisturePercentage);
+  Serial.println("%");
+
+  // Check thresholds and control the relay
+  if (temperature > 60.0 || moisturePercentage > 60) {
+    // If temperature exceeds 25.0°C and moisture is less than 30%
+    digitalWrite(RELAY_PIN, HIGH); // Turn ON the relay
+    Serial.println("Relay ON");
+  } else {
+    digitalWrite(RELAY_PIN, LOW); // Turn OFF the relay
+    Serial.println("Relay OFF");
+  }
+
+   if (Firebase.ready() && signupOK && (millis() - sendDataPrevMillis > 1000 || sendDataPrevMillis == 0)){
+    sendDataPrevMillis = millis();
+
+     if (Firebase.RTDB.setFloat(&fbdo, "mainbucket/temperature", temperature)){
+      Serial.println("PATH: " + fbdo.dataPath());
+      Serial.println("TYPE: " + fbdo.dataType());
+    }
+    else {
+      Serial.println("Failed REASON: " + fbdo.errorReason());
+    }
+
+    if (Firebase.ready() && signupOK && (millis() - sendDataPrevMillis > 1000 || sendDataPrevMillis == 0)){
+    sendDataPrevMillis = millis();
+
+     if (Firebase.RTDB.setFloat(&fbdo, "mainbucket/humidity", humidity)){
+      Serial.println("PATH: " + fbdo.dataPath());
+      Serial.println("TYPE: " + fbdo.dataType());
+    }
+    else {
+      Serial.println("Failed REASON: " + fbdo.errorReason());
+    }
+
+     if (Firebase.RTDB.setFloat(&fbdo, "mainbucket/soilMoisture", soilMoisture)){
+      Serial.println("PATH: " + fbdo.dataPath());
+      Serial.println("TYPE: " + fbdo.dataType());
+    }
+    else {
+      Serial.println("Failed REASON: " + fbdo.errorReason());
+    }
+  delay(2000);  // Adjust the delay based on your application
+   }
+}
+
+This paste expires in <1 hour. Public IP access. Share whatever you see with others in seconds with Context.Terms of ServiceReport this
